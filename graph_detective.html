@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
+    .game-wrapper { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    h3 { margin: 0 0 8px 0; font-size: 18px; font-weight: 500; }
+    .subtitle { font-size: 12px; color: #666; margin: 0; }
+    .top-section { display: flex; gap: 20px; }
+    .grid-container { flex: 1; }
+    .sidebar { width: 260px; display: flex; flex-direction: column; gap: 12px; }
+    .game-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; margin-top: 12px; background: #e0e0e0; padding: 4px; border-radius: 4px; }
+    .grid-tile { width: 44px; height: 44px; background: white; border: 0.5px solid #999; border-radius: 2px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; font-weight: 500; user-select: none; }
+    .grid-tile:hover:not(.disabled) { background: #f0f0f0; }
+    .grid-tile.revealed { background: #f9f9f9; cursor: default; }
+    .grid-tile.success { background: #dcfce7; color: #16a34a; }
+    .grid-tile.accent { background: #e0f2fe; color: #0284c7; }
+    .grid-tile.warning { background: #fef3c7; color: #ca8a04; }
+    .grid-tile.hot { color: #ef4444; font-weight: 600; }
+    .grid-tile.warm { color: #f59e0b; font-weight: 600; }
+    .grid-tile.cool { color: #0ea5e9; font-weight: 600; }
+    .stat-box { background: white; border: 0.5px solid #ddd; border-radius: 4px; padding: 12px; }
+    .moves-bar { background: white; border: 0.5px solid #ddd; border-radius: 4px; padding: 10px; }
+    .progress-bar { width: 100%; height: 20px; background: #eee; border: 0.5px solid #ddd; border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #10b981; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; font-weight: 500; }
+    .game-over { background: white; border: 0.5px solid #ddd; border-radius: 4px; padding: 12px; }
+    .game-over.win { border-color: #10b981; background: #f0fdf4; }
+    .game-over-title { font-weight: 600; margin-bottom: 6px; }
+    .game-over.win .game-over-title { color: #16a34a; }
+    .missed-items { background: rgba(0,0,0,0.05); border-radius: 4px; padding: 8px; margin-bottom: 8px; }
+    .reset-btn { background: #0284c7; color: white; border: none; border-radius: 4px; padding: 6px 12px; font-size: 11px; cursor: pointer; font-weight: 500; width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="game-wrapper">
+    <div>
+      <h3>Chebyshev Distance Graph Detective</h3>
+      <p class="subtitle">Find all 5 keys. Numbers show Chebyshev distance (distinct from Manhattan and Euclidean). Distance = max(|Δrow|, |Δcol|) hence diagonal neighbors count as 1 step.</p>
+    </div>
+
+    <div class="top-section">
+      <div class="grid-container">
+        <h3 style="margin-bottom: 4px;">Hidden grid (9×9)</h3>
+        <div class="game-grid" id="gameGrid"></div>
+      </div>
+
+      <div class="sidebar">
+        <div class="moves-bar">
+          <div style="font-size: 11px; color: #666; margin-bottom: 6px;">Moves left:</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 100%;"><span id="movesText">35/35</span></div>
+          </div>
+        </div>
+
+        <div class="stat-box" style="text-align: center;">
+          <div style="font-size: 11px; color: #666;">Found</div>
+          <div style="font-weight: 600; font-size: 14px;"><span id="discovered">0</span>/5</div>
+        </div>
+
+        <div id="gameOverContainer"></div>
+
+        <div class="stat-box" style="font-size: 10px;">
+          <div style="margin-bottom: 4px;"><span style="color: #ef4444; font-weight: 600;">1-2</span> = Hot</div>
+          <div style="margin-bottom: 4px;"><span style="color: #f59e0b; font-weight: 600;">3-4</span> = Warm</div>
+          <div><span style="color: #0ea5e9; font-weight: 600;">5+</span> = Cool</div>
+        </div>
+
+        <div class="stat-box" style="font-size: 10px;">
+          <div><strong>Click</strong> to reveal</div>
+        </div>
+
+        <div class="stat-box">
+          <div style="font-size: 11px; color: #666; margin-bottom: 6px;">Last revealed:</div>
+          <div style="font-size: 12px;" id="clueText">Click to start</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MAX_MOVES = 35;
+
+    const gameState = {
+      revealed: new Set(),
+      tileDistances: {}, // Pre-computed distances
+      movesLeft: MAX_MOVES,
+      gameOver: false,
+      won: false,
+      items: [
+        { id: 'key1', name: 'Key', pos: 0, symbol: '🔑', color: 'success' },
+        { id: 'key2', name: 'Key', pos: 0, symbol: '🔑', color: 'accent' },
+        { id: 'key3', name: 'Key', pos: 0, symbol: '🔑', color: 'success' },
+        { id: 'key4', name: 'Key', pos: 0, symbol: '🔑', color: 'warning' },
+        { id: 'key5', name: 'Key', pos: 0, symbol: '🔑', color: 'accent' }
+      ],
+      getItemAt(pos) { return this.items.find(it => it.pos === pos); }
+    };
+
+    // Randomize item positions
+    function randomizeItemPositions() {
+      const positions = new Set();
+      while (positions.size < 5) {
+        positions.add(Math.floor(Math.random() * 81));
+      }
+      const posArray = Array.from(positions);
+      gameState.items.forEach((item, index) => {
+        item.pos = posArray[index];
+      });
+    }
+
+    // Pre-compute distances to nearest item for all tiles
+    function precomputeDistances() {
+      for (let i = 0; i < 81; i++) {
+        let minDistance = 999;
+        gameState.items.forEach(item => {
+          const dist = getManhattanDistance(i, item.pos);
+          minDistance = Math.min(minDistance, dist);
+        });
+        gameState.tileDistances[i] = minDistance;
+      }
+    }
+
+    function getManhattanDistance(pos1, pos2) {
+      const row1 = Math.floor(pos1 / 9), col1 = pos1 % 9;
+      const row2 = Math.floor(pos2 / 9), col2 = pos2 % 9;
+      return Math.max(Math.abs(row1 - row2), Math.abs(col1 - col2));
+    }
+
+    function getDistanceToNearestItem(pos) {
+      let minDistance = 999;
+      gameState.items.forEach(item => {
+        const dist = getManhattanDistance(pos, item.pos);
+        minDistance = Math.min(minDistance, dist);
+      });
+      return minDistance;
+    }
+
+    function getTemperature(distance) {
+      if (distance <= 2) return { class: 'hot', label: '🔥' };
+      if (distance <= 4) return { class: 'warm', label: '💭' };
+      return { class: 'cool', label: '❄️' };
+    }
+
+    function updateMoveBar() {
+      const remaining = gameState.movesLeft;
+      const pct = (remaining / MAX_MOVES) * 100;
+      const fill = document.getElementById('progressFill');
+      fill.style.width = pct + '%';
+      fill.textContent = `${remaining}/${MAX_MOVES}`;
+      fill.style.background = pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
+    }
+
+    function checkGameOver() {
+      const discovered = gameState.items.filter(it => gameState.revealed.has(it.pos));
+      if (discovered.length === 5) {
+        gameState.gameOver = true;
+        gameState.won = true;
+        return true;
+      }
+      if (gameState.movesLeft === 0 && discovered.length < 5) {
+        gameState.gameOver = true;
+        gameState.won = false;
+        return true;
+      }
+      return false;
+    }
+
+    function showGameOver() {
+      const container = document.getElementById('gameOverContainer');
+      const discovered = gameState.items.filter(it => gameState.revealed.has(it.pos));
+      const missed = gameState.items.filter(it => !gameState.revealed.has(it.pos));
+
+      let missedHtml = '';
+      if (missed.length > 0) {
+        missedHtml = `<div class="missed-items">
+          <div style="font-size: 10px; font-weight: 500; color: #666; margin-bottom: 6px;">Missed items:</div>
+          ${missed.map(item => `<div style="font-size: 11px; margin-bottom: 3px;">${item.symbol} ${item.name}</div>`).join('')}
+        </div>`;
+      }
+
+      if (gameState.won) {
+        container.innerHTML = `<div class="game-over win">
+          <p class="game-over-title">🎉 Victory!</p>
+          <p style="font-size: 11px; margin: 0;">Found all 5 with ${gameState.movesLeft} moves left!</p>
+          <button class="reset-btn" onclick="location.reload()">Play again</button>
+        </div>`;
+      } else {
+        container.innerHTML = `<div class="game-over">
+          <p class="game-over-title">Game Over</p>
+          <p style="font-size: 11px; margin: 0 0 8px 0;">Found ${discovered.length}/5 items.</p>
+          ${missedHtml}
+          <button class="reset-btn" onclick="location.reload()">Try again</button>
+        </div>`;
+      }
+    }
+
+    function renderGrid() {
+      const grid = document.getElementById('gameGrid');
+      grid.innerHTML = '';
+      for (let i = 0; i < 81; i++) {
+        const tile = document.createElement('div');
+        tile.className = 'grid-tile';
+
+        if (gameState.revealed.has(i)) {
+          const item = gameState.getItemAt(i);
+          if (item) {
+            tile.textContent = item.symbol;
+            tile.classList.add(item.color, 'revealed');
+          } else {
+            const distance = gameState.tileDistances[i];
+            const temp = getTemperature(distance);
+            tile.textContent = distance;
+            tile.classList.add('revealed', temp.class);
+            tile.style.opacity = '0.6';
+          }
+        } else if (gameState.gameOver) {
+          const item = gameState.getItemAt(i);
+          if (item && !gameState.revealed.has(i)) {
+            tile.textContent = item.symbol;
+            tile.classList.add(item.color, 'revealed');
+            tile.style.opacity = '1';
+            tile.style.background = '#fee2e2';
+            tile.style.color = '#dc2626';
+          } else if (item) {
+            tile.textContent = item.symbol;
+            tile.classList.add(item.color, 'revealed');
+            tile.style.opacity = '0.5';
+          } else {
+            const distance = gameState.tileDistances[i];
+            const temp = getTemperature(distance);
+            tile.textContent = distance;
+            tile.classList.add('revealed', temp.class);
+            tile.style.opacity = '1';
+          }
+        } else {
+          tile.textContent = '';
+          tile.onclick = () => revealTile(i);
+        }
+        grid.appendChild(tile);
+      }
+    }
+
+    function revealTile(pos) {
+      if (gameState.gameOver || gameState.revealed.has(pos)) return;
+
+      gameState.revealed.add(pos);
+      gameState.movesLeft--;
+
+      const item = gameState.getItemAt(pos);
+      const distance = gameState.tileDistances[pos];
+
+      if (item) {
+        document.getElementById('clueText').textContent = `Found: ${item.name}! 🎯`;
+      } else {
+        const temp = getTemperature(distance);
+        document.getElementById('clueText').textContent = `Empty. Nearest item is ${distance} steps away. ${temp.label}`;
+      }
+
+      const discovered = gameState.items.filter(it => gameState.revealed.has(it.pos)).length;
+      document.getElementById('discovered').textContent = discovered;
+
+      updateMoveBar();
+      renderGrid();
+
+      if (checkGameOver()) {
+        showGameOver();
+        renderGrid();
+      }
+    }
+
+    randomizeItemPositions();
+    precomputeDistances();
+    renderGrid();
+    updateMoveBar();
+  </script>
+</body>
+</html>
